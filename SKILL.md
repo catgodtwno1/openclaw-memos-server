@@ -91,6 +91,8 @@ bash scripts/install_memos_launchagent.sh
 | `/health` returns 404 | No health route in this API version | Use `/docs` or business endpoints |
 | Container won't start | Colima not running | `colima start` first |
 | Embedding fails | SiliconFlow token invalid | Check `.env` `EMBEDDING_API_KEY` |
+| Add timeout after ~130 writes | Neo4j O(N) scan, missing indexes | Apply Neo4j indexes (see Known Issues) |
+| P99 latency >10s on add | Neo4j transaction backlog | Restart memos-api, apply indexes |
 
 ## Known issues (2026-03-24)
 
@@ -106,6 +108,33 @@ bash scripts/install_memos_launchagent.sh
 - Increase timeout if doing batch imports
 - Batch multiple facts into a single `messages` array rather than one-per-call
 - If neo4j hangs completely: `docker restart memos-api`
+
+### Neo4j O(N) full-scan bottleneck (fixed 2026-03-25)
+
+**Symptom:** After ~130 consecutive writes, `/product/add` starts timing out at 15s+. P50 stays normal (~90ms) but P99 explodes.
+
+**Root cause:** Two O(N) patterns in MemOS code:
+1. `get_all_memory_items(scope="WorkingMemory")` in `tree.py:122` — full `MATCH (n:Memory) RETURN n` scan on every add
+2. `remove_oldest_memory()` uses `ORDER BY ... SKIP N LIMIT 1` — O(N) with large node counts
+
+**Fix applied:**
+1. Created composite index: `CREATE INDEX memory_type_user_index FOR (n:Memory) ON (n.memory_type, n.user_name)`
+2. Created range index: `CREATE RANGE INDEX memory_updated_at_index FOR (n:Memory) ON (n.updated_at)`
+3. Created unique constraint: `CREATE CONSTRAINT memory_id_unique FOR (n:Memory) REQUIRE n.id IS UNIQUE`
+4. Neo4j memory tuning: heap 512m, pagecache 512M, transaction limits 64m/256m
+
+**Verification (post-fix):**
+- 100 rounds: P50=89ms, P95=124ms, Max=176ms, 0 errors ✅
+- 500 rounds: L35/add Max=176ms (was 15177ms), 0 errors
+
+**To apply indexes on a new deployment:**
+```bash
+docker exec memos-neo4j cypher-shell -u neo4j -p password "
+CREATE INDEX memory_type_user_index IF NOT EXISTS FOR (n:Memory) ON (n.memory_type, n.user_name);
+CREATE RANGE INDEX memory_updated_at_index IF NOT EXISTS FOR (n:Memory) ON (n.updated_at);
+CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (n:Memory) REQUIRE n.id IS UNIQUE;
+"
+```
 
 ### SimpleStruct MemReader warning
 
