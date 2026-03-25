@@ -18,7 +18,7 @@ def post_json(url: str, payload: dict) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description='Smoke test a remote MemOS server.')
-    ap.add_argument('--base-url', required=True, help='e.g. http://10.10.20.178:8765')
+    ap.add_argument('--base-url', required=True, help='e.g. http://<SERVER_IP>:8765')
     ap.add_argument('--user-id', default=None, help='logical user / cube id to use')
     args = ap.parse_args()
 

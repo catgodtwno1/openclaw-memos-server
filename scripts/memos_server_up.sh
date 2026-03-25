@@ -80,5 +80,5 @@ for i in {1..90}; do
 done
 
 echo "MemOS API is ready at http://127.0.0.1:${API_PORT}"
-echo "LAN URL: http://10.10.20.178:${API_PORT}"
+echo "LAN URL: http://<SERVER_IP>:${API_PORT}"
 echo "Note: this MemOS build does not expose /health; use /docs or /product/* for checks."

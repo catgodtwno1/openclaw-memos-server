@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)
       cat <<'EOF'
 Usage:
-  onboard_memos_client.sh --base-url http://10.10.20.178:8765 [--user-id LinZhiYan]
+  onboard_memos_client.sh --base-url http://<SERVER_IP>:8765 [--user-id LinZhiYan]
 
 What it does:
   1. Writes a local client env file for MemOS
