@@ -221,7 +221,34 @@ $DOCKER run -d \
 - 100 rounds (indexed, few nodes): P50=89ms, P95=124ms, Max=176ms, 0 errors ✅
 - 500 rounds (1400+ nodes, 200ms throttle): **Still fails** — O(N) scan is in application code (`get_all_memory_items`), not purely a DB index issue. Indexes help with small node counts but can't fix the Python-level full scan + in-memory dedup.
 
-**Conclusion:** This is a MemOS architecture issue. Daily OpenClaw usage (sparse writes) is fine. Batch imports >100 items should use throttling (500ms+ gap) or be split across sessions with container restarts between batches.
+**Post-patch verification (2026-03-25):**
+
+After patching `core.py` to force `mode="fast"`, the O(N) bottleneck is effectively mitigated for normal usage:
+
+| 環境 | 輪次 | 成功 | Avg | P50 | P95 | P99 | Max | 衰退 |
+|------|------|------|-----|-----|-----|-----|-----|------|
+| 本機 | 500 | 500/0 | 19ms | — | — | — | — | — |
+| NAS | 500 | 500/0 | 92ms | 56ms | 280ms | 348ms | 421ms | 0.9x ✅ |
+
+**Conclusion:** Patch 生效後 500 輪零錯誤、無衰退。日常使用完全沒問題。
+
+### 獨立壓測腳本
+
+```bash
+# 本機測試
+python3 scripts/memos_stress_test.py --rounds 500
+
+# NAS 測試
+python3 scripts/memos_stress_test.py --url http://10.10.10.66:8765 --rounds 500
+
+# 測試完清理數據
+python3 scripts/memos_stress_test.py --url http://10.10.10.66:8765 --rounds 100 --cleanup
+```
+
+判定標準：
+- ✅ PASS: 零錯誤 + 衰退 ≤ 1.5x
+- ⚠️ WARN: 零錯誤但衰退 > 1.5x（patch 可能部分失效）
+- ❌ FAIL: 有錯誤（timeout/HTTP error）
 
 **To apply indexes on a new deployment:**
 ```bash
@@ -251,3 +278,4 @@ CREATE CONSTRAINT memory_id_unique IF NOT EXISTS FOR (n:Memory) REQUIRE n.id IS 
 | `scripts/install_memos_launchagent.sh` | macOS autostart |
 | `scripts/memos_client_smoke_test.py` | Real add+search validation |
 | `scripts/onboard_memos_client.sh` | One-command client onboard |
+| `scripts/memos_stress_test.py` | 500 輪壓測（驗證 O(N) patch） |
