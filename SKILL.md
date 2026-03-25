@@ -181,8 +181,11 @@ $DOCKER run -d \
   -v /path/to/memos-data:/app/data \
   -v /path/to/neo4j_community_patched.py:/app/src/memos/graph_dbs/neo4j_community.py \
   -v /path/to/core_patched.py:/app/src/memos/mem_os/core.py \
-  local/memos-api:latest
+  local/memos-api:latest \
+  uvicorn memos.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
+
+> **`--workers 4`**: Multi-worker uvicorn prevents a single slow Neo4j write from blocking all other requests. Especially important for NAS deployments where single-worker is the default.
 
 ## Known issues (2026-03-24)
 
@@ -198,6 +201,7 @@ $DOCKER run -d \
 - Increase timeout if doing batch imports
 - Batch multiple facts into a single `messages` array rather than one-per-call
 - If neo4j hangs completely: `docker restart memos-api`
+- Use `--workers 4` in uvicorn for multi-worker concurrency (NAS especially)
 
 ### Neo4j O(N) full-scan bottleneck (fixed 2026-03-25)
 
@@ -214,8 +218,10 @@ $DOCKER run -d \
 4. Neo4j memory tuning: heap 512m, pagecache 512M, transaction limits 64m/256m
 
 **Verification (post-fix):**
-- 100 rounds: P50=89ms, P95=124ms, Max=176ms, 0 errors ✅
-- 500 rounds: L35/add Max=176ms (was 15177ms), 0 errors
+- 100 rounds (indexed, few nodes): P50=89ms, P95=124ms, Max=176ms, 0 errors ✅
+- 500 rounds (1400+ nodes, 200ms throttle): **Still fails** — O(N) scan is in application code (`get_all_memory_items`), not purely a DB index issue. Indexes help with small node counts but can't fix the Python-level full scan + in-memory dedup.
+
+**Conclusion:** This is a MemOS architecture issue. Daily OpenClaw usage (sparse writes) is fine. Batch imports >100 items should use throttling (500ms+ gap) or be split across sessions with container restarts between batches.
 
 **To apply indexes on a new deployment:**
 ```bash
